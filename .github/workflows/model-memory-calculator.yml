@@ -1,0 +1,68 @@
+name: Model Memory Calculator
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario_json:
+        description: "直接粘贴计算配置 JSON；为空则读取 scenario_file"
+        required: false
+        type: string
+        default: ""
+      scenario_file:
+        description: "仓库内计算配置文件路径"
+        required: false
+        type: string
+        default: "examples/memory_scenario.json"
+
+jobs:
+  calculate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Prepare scenario input
+        env:
+          SCENARIO_JSON: ${{ inputs.scenario_json }}
+          SCENARIO_FILE: ${{ inputs.scenario_file }}
+        run: |
+          if [ -n "$SCENARIO_JSON" ]; then
+            printf '%s' "$SCENARIO_JSON" > /tmp/memory_scenario.json
+          else
+            cp "$SCENARIO_FILE" /tmp/memory_scenario.json
+          fi
+          python -m json.tool /tmp/memory_scenario.json > /tmp/memory_scenario.pretty.json
+          mv /tmp/memory_scenario.pretty.json /tmp/memory_scenario.json
+          cp /tmp/memory_scenario.json memory_scenario.input.json
+
+      - name: Run calculator
+        run: |
+          python -m py_compile \
+            model_memory_core.py \
+            model_memory_cli.py \
+            model_memory_http_server.py \
+            model_memory_calculator.py \
+            aws_lambda_handler.py
+          python model_memory_cli.py \
+            --input-file /tmp/memory_scenario.json \
+            --output memory_result.json \
+            --summary-output memory_result.md
+
+      - name: Add job summary
+        run: cat memory_result.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload result artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-memory-calculation
+          path: |
+            memory_result.json
+            memory_result.md
+            memory_scenario.input.json
